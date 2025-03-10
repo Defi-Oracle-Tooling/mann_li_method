@@ -1,16 +1,35 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "./MannLiBondToken.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
+import { MannLiBondToken } from "./MannLiBondToken.sol";
 
 /**
  * @title MannLiReinvestment
  * @dev Manages reinvestment of bond yields and buyback mechanisms
  */
 contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
+    // Custom errors for gas optimization
+    error InvalidRate(uint256 rate);
+    error InvalidMinimumAmount();
+    error InvalidMaximumAmount(uint256 min, uint256 max);
+    error InvalidDiscountRate(uint256 rate);
+    error InvalidCooldownPeriod();
+    error NoFundsToReinvest();
+    error ReinvestmentAmountTooSmall();
+    error AmountBelowMinimum(uint256 amount, uint256 minimum);
+    error AmountAboveMaximum(uint256 amount, uint256 maximum);
+    error CooldownPeriodNotElapsed(uint256 nextAllowedTime);
+    error InsufficientBonds(uint256 requested, uint256 available);
+    error InsufficientPoolFunds(uint256 requested, uint256 available);
+    error BondTransferFailed();
+    error EthTransferFailed();
+    error OnlyInternalCalls();
+    error NoStrategySet();
+    error InvalidStrategyAddress();
+    error InvalidAmount();
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
     bytes32 public constant STRATEGY_MANAGER_ROLE = keccak256("STRATEGY_MANAGER_ROLE");
     
@@ -84,7 +103,7 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
     }
 
     function setReinvestmentRate(uint256 newRate) external onlyRole(MANAGER_ROLE) {
-        require(newRate >= 2000 && newRate <= 5000, "Rate must be between 20-50%");
+        if (newRate < 2000 || newRate > 5000) revert InvalidRate(newRate);
         uint256 oldRate = pool.reinvestmentRate;
         pool.reinvestmentRate = newRate;
         emit ReinvestmentRateUpdated(oldRate, newRate);
@@ -96,10 +115,10 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
         uint256 _discountRate,
         uint256 _cooldownPeriod
     ) external onlyRole(MANAGER_ROLE) {
-        require(_minimumAmount > 0, "Invalid minimum amount");
-        require(_maximumAmount >= _minimumAmount, "Invalid maximum amount");
-        require(_discountRate <= 2000, "Discount too high"); // Max 20% discount
-        require(_cooldownPeriod > 0, "Invalid cooldown period");
+        if (_minimumAmount == 0) revert InvalidMinimumAmount();
+        if (_maximumAmount < _minimumAmount) revert InvalidMaximumAmount(_minimumAmount, _maximumAmount);
+        if (_discountRate > 2000) revert InvalidDiscountRate(_discountRate); // Max 20% discount
+        if (_cooldownPeriod == 0) revert InvalidCooldownPeriod();
 
         buybackParams = BuybackParams({
             minimumAmount: _minimumAmount,
@@ -118,10 +137,10 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
 
     function reinvestYield() external nonReentrant onlyRole(MANAGER_ROLE) {
         uint256 balance = address(this).balance;
-        require(balance > 0, "No funds to reinvest");
+        if (balance == 0) revert NoFundsToReinvest();
         
         uint256 reinvestAmount = (balance * pool.reinvestmentRate) / 10000;
-        require(reinvestAmount > 0, "Reinvestment amount too small");
+        if (reinvestAmount == 0) revert ReinvestmentAmountTooSmall();
 
         try this.executeReinvestment(reinvestAmount) {
             // Note: executeReinvestment already updates pool.totalFunds
@@ -135,7 +154,7 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
     }
 
     function executeReinvestment(uint256 _amount) external {
-        require(msg.sender == address(this), "Only internal calls");
+        if (msg.sender != address(this)) revert OnlyInternalCalls();
         // Store the amount in the pool's totalFunds since this is
         // a placeholder for future DeFi integrations
         pool.totalFunds += _amount;
@@ -146,17 +165,15 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
         nonReentrant 
         onlyRole(MANAGER_ROLE) 
     {
-        require(amount >= buybackParams.minimumAmount, "Amount below minimum");
-        require(amount <= buybackParams.maximumAmount, "Amount above maximum");
-        require(
-            block.timestamp >= lastBuybackTime[holder] + buybackParams.cooldownPeriod,
-            "Cooldown period not elapsed"
-        );
-        require(bondToken.balanceOf(holder) >= amount, "Insufficient bonds");
-        require(pool.totalFunds >= amount, "Insufficient pool funds");
+        if (amount < buybackParams.minimumAmount) revert AmountBelowMinimum(amount, buybackParams.minimumAmount);
+        if (amount > buybackParams.maximumAmount) revert AmountAboveMaximum(amount, buybackParams.maximumAmount);
+        if (block.timestamp < lastBuybackTime[holder] + buybackParams.cooldownPeriod)
+            revert CooldownPeriodNotElapsed(lastBuybackTime[holder] + buybackParams.cooldownPeriod);
+        if (bondToken.balanceOf(holder) < amount) revert InsufficientBonds(amount, bondToken.balanceOf(holder));
+        if (pool.totalFunds < amount) revert InsufficientPoolFunds(amount, pool.totalFunds);
 
         uint256 buybackPrice = calculateBuybackPrice(amount);
-        require(buybackPrice <= pool.totalFunds, "Insufficient funds for buyback");
+        if (buybackPrice > pool.totalFunds) revert InsufficientPoolFunds(buybackPrice, pool.totalFunds);
 
         lastBuybackTime[holder] = block.timestamp;
         holderBuybacks[holder] += amount;
@@ -164,17 +181,15 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
         pool.totalBuybacks += amount;
 
         // Transfer bonds from holder to this contract
-        require(
-            bondToken.transferFrom(holder, address(this), amount),
-            "Bond transfer failed"
-        );
+        if (!bondToken.transferFrom(holder, address(this), amount))
+            revert BondTransferFailed();
         
         // Burn the bought back bonds
         bondToken.redeem(address(this), amount, "Buyback and burn");
         
         // Transfer ETH to holder
         (bool success, ) = holder.call{value: buybackPrice}("");
-        require(success, "ETH transfer failed");
+        if (!success) revert EthTransferFailed();
 
         emit BuybackExecuted(
             holder,
@@ -208,7 +223,7 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
     function emergencyWithdraw() external onlyRole(DEFAULT_ADMIN_ROLE) {
         uint256 balance = address(this).balance;
         (bool success, ) = payable(msg.sender).call{value: balance}("");
-        require(success, "Withdrawal failed");
+        if (!success) revert EthTransferFailed();
         emit EmergencyWithdrawal(msg.sender, balance);
     }
     
@@ -217,7 +232,7 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
         external 
         onlyRole(STRATEGY_MANAGER_ROLE) 
     {
-        require(strategyAddress != address(0), "Invalid strategy address");
+        if (strategyAddress == address(0)) revert InvalidStrategyAddress();
         currentStrategy = strategyAddress;
         emit ReinvestmentStrategyUpdated(strategyName, strategyAddress);
     }
@@ -228,8 +243,8 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
         onlyRole(STRATEGY_MANAGER_ROLE) 
         returns (uint256)
     {
-        require(currentStrategy != address(0), "No strategy set");
-        require(amount > 0 && amount <= pool.totalFunds, "Invalid amount");
+        if (currentStrategy == address(0)) revert NoStrategySet();
+        if (amount == 0 || amount > pool.totalFunds) revert InvalidAmount();
         
         // Placeholder for strategy execution
         // In a real implementation, this would call into the strategy contract

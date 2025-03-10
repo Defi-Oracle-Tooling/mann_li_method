@@ -1,14 +1,32 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
+import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title MannLiBondToken
  * @dev Implementation of the Mann Li Method Bond Token with step-down rate model
  */
-contract MannLiBondToken is ERC20Pausable, AccessControl {
+contract MannLiBondToken is ERC20, Pausable, AccessControl {
+    // Custom errors for gas optimization
+    error InvalidInitialRate(uint256 rate);
+    error InvalidStepDownRate(uint256 rate);
+    error InvalidMaturityPeriod(uint256 period);
+    error InvalidStepDownPeriod(uint256 period);
+    error InvalidAddress();
+    error InvalidAmount();
+    error BondSeriesNotActive(uint256 seriesId);
+    error NoBondsHeld();
+    error BondNotMatured();
+    error MaturityAlreadyClaimed();
+    error InsufficientBalance(uint256 requested, uint256 available);
+    error SenderRestricted();
+    error RecipientRestricted();
+    error TransferLocked(uint256 unlockTime);
+    error InvalidSeriesId(uint256 seriesId);
+    error RateLimitExceeded(uint256 nextAllowedTime);
     bytes32 public constant ISSUER_ROLE = keccak256("ISSUER_ROLE");
     bytes32 public constant RATE_MANAGER_ROLE = keccak256("RATE_MANAGER_ROLE");
     
@@ -53,10 +71,8 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
     event SeriesRatesAdjusted(uint256 indexed seriesId, uint256 oldInitialRate, uint256 newInitialRate, uint256 oldStepDownRate, uint256 newStepDownRate);
 
     modifier rateLimited() {
-        require(
-            block.timestamp >= lastActionTime[msg.sender] + 1 hours,
-            "Rate limit: Too many actions"
-        );
+        if (block.timestamp < lastActionTime[msg.sender] + 1 hours)
+            revert RateLimitExceeded(lastActionTime[msg.sender] + 1 hours);
         lastActionTime[msg.sender] = block.timestamp;
         _;
     }
@@ -93,10 +109,10 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         uint256 maturityPeriod,
         uint256 stepDownPeriod
     ) internal returns (uint256) {
-        require(initialRate > 0 && initialRate <= 2000, "Invalid initial rate"); // Max 20%
-        require(stepDownRate > 0 && stepDownRate <= initialRate, "Invalid step-down rate");
-        require(maturityPeriod > 0, "Invalid maturity period");
-        require(stepDownPeriod > 0 && stepDownPeriod < maturityPeriod, "Invalid step-down period");
+        if (initialRate == 0 || initialRate > 2000) revert InvalidInitialRate(initialRate);
+        if (stepDownRate == 0 || stepDownRate > initialRate) revert InvalidStepDownRate(stepDownRate);
+        if (maturityPeriod == 0) revert InvalidMaturityPeriod(maturityPeriod);
+        if (stepDownPeriod == 0 || stepDownPeriod >= maturityPeriod) revert InvalidStepDownPeriod(stepDownPeriod);
         
         uint256 seriesId = nextSeriesId++;
         
@@ -128,9 +144,9 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         onlyRole(ISSUER_ROLE)
         whenNotPaused
     {
-        require(to != address(0), "Invalid address");
-        require(amount > 0, "Invalid amount");
-        require(bondSeries[seriesId].active, "Bond series not active");
+        if (to == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+        if (!bondSeries[seriesId].active) revert BondSeriesNotActive(seriesId);
         
         BondSeries memory series = bondSeries[seriesId];
         
@@ -167,7 +183,7 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         whenNotPaused 
         returns (uint256)
     {
-        require(balanceOf(holder) > 0, "No bonds held");
+        if (balanceOf(holder) == 0) revert NoBondsHeld();
         
         uint256 rate = getCurrentRate(holder);
         uint256 amount = (balanceOf(holder) * rate) / RATE_DENOMINATOR;
@@ -180,12 +196,12 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
 
     function claimMaturity() external whenNotPaused {
         BondParams storage params = bondHolders[msg.sender];
-        require(params.issueDate > 0, "No bonds held");
-        require(block.timestamp >= params.maturityDate, "Bond not matured");
-        require(!params.maturityClaimed, "Maturity already claimed");
+        if (params.issueDate == 0) revert NoBondsHeld();
+        if (block.timestamp < params.maturityDate) revert BondNotMatured();
+        if (params.maturityClaimed) revert MaturityAlreadyClaimed();
         
         uint256 balance = balanceOf(msg.sender);
-        require(balance > 0, "No bonds to claim");
+        if (balance == 0) revert NoBondsHeld();
         
         // Transfer principal amount back to the holder
         params.maturityClaimed = true;
@@ -202,8 +218,8 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         onlyRole(ISSUER_ROLE) 
         whenNotPaused 
     {
-        require(amount > 0, "Invalid amount");
-        require(balanceOf(holder) >= amount, "Insufficient balance");
+        if (amount == 0) revert InvalidAmount();
+        if (balanceOf(holder) < amount) revert InsufficientBalance(amount, balanceOf(holder));
         
         _burn(holder, amount);
         emit BondRedeemed(holder, amount, reason);
@@ -221,7 +237,7 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         external
         onlyRole(RATE_MANAGER_ROLE)
     {
-        require(seriesId > 0 && seriesId < nextSeriesId, "Invalid series ID");
+        if (seriesId == 0 || seriesId >= nextSeriesId) revert InvalidSeriesId(seriesId);
         bondSeries[seriesId].active = active;
         emit BondSeriesUpdated(seriesId, active);
     }
@@ -238,7 +254,7 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
             bool active
         ) 
     {
-        require(seriesId > 0 && seriesId < nextSeriesId, "Invalid series ID");
+        if (seriesId == 0 || seriesId >= nextSeriesId) revert InvalidSeriesId(seriesId);
         BondSeries memory series = bondSeries[seriesId];
         
         return (
@@ -255,18 +271,16 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         address from,
         address to,
         uint256 amount
-    ) internal virtual override {
+    ) internal virtual override(ERC20) whenNotPaused {
         // Check transfer restrictions
         if (from != address(0) && to != address(0)) { // Exclude minting and burning
-            require(!transferRestricted[from], "Sender is restricted");
-            require(!transferRestricted[to], "Recipient is restricted");
+            if (transferRestricted[from]) revert SenderRestricted();
+            if (transferRestricted[to]) revert RecipientRestricted();
             
             // Check lockup period for sender
             BondParams memory params = bondHolders[from];
-            require(
-                block.timestamp >= params.issueDate + TRANSFER_LOCKUP_PERIOD,
-                "Transfer locked during initial period"
-            );
+            if (block.timestamp < params.issueDate + TRANSFER_LOCKUP_PERIOD) 
+                revert TransferLocked(params.issueDate + TRANSFER_LOCKUP_PERIOD);
         }
         super._update(from, to, amount);
     }
@@ -288,9 +302,9 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         onlyRole(RATE_MANAGER_ROLE)
         rateLimited 
     {
-        require(seriesId > 0 && seriesId < nextSeriesId, "Invalid series ID");
-        require(newInitialRate > 0 && newInitialRate <= 2000, "Invalid initial rate"); // Max 20%
-        require(newStepDownRate > 0 && newStepDownRate <= newInitialRate, "Invalid step-down rate");
+        if (seriesId == 0 || seriesId >= nextSeriesId) revert InvalidSeriesId(seriesId);
+        if (newInitialRate == 0 || newInitialRate > 2000) revert InvalidInitialRate(newInitialRate);
+        if (newStepDownRate == 0 || newStepDownRate > newInitialRate) revert InvalidStepDownRate(newStepDownRate);
         
         BondSeries storage series = bondSeries[seriesId];
         
@@ -309,12 +323,12 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         external 
         whenNotPaused 
     {
-        require(amount > 0, "Invalid amount");
-        require(balanceOf(msg.sender) >= amount, "Insufficient balance");
+        if (amount == 0) revert InvalidAmount();
+        if (balanceOf(msg.sender) < amount) revert InsufficientBalance(amount, balanceOf(msg.sender));
         
         BondParams storage params = bondHolders[msg.sender];
-        require(params.issueDate > 0, "No bonds held");
-        require(!params.maturityClaimed, "Maturity already claimed");
+        if (params.issueDate == 0) revert NoBondsHeld();
+        if (params.maturityClaimed) revert MaturityAlreadyClaimed();
         
         // Calculate early redemption penalty (10% of amount)
         uint256 penalty = (amount * 1000) / RATE_DENOMINATOR;

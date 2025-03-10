@@ -64,7 +64,7 @@ contract MannLiBondTokenTest is Test {
         vm.stopPrank();
 
         vm.startPrank(holder1);
-        vm.expectRevert("Sender is restricted");
+        vm.expectRevert(MannLiBondToken.SenderRestricted.selector);
         bondToken.transfer(holder2, amount);
         vm.stopPrank();
     }
@@ -255,7 +255,12 @@ contract MannLiBondTokenTest is Test {
         bondToken.adjustSeriesRates(seriesId, 1100, 850);
         
         // Second rate adjustment should fail due to rate limiting
-        vm.expectRevert("Rate limit: Too many actions");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MannLiBondToken.RateLimitExceeded.selector,
+                block.timestamp + 1 hours
+            )
+        );
         bondToken.adjustSeriesRates(seriesId, 1050, 800);
         
         // Wait for rate limit to expire
