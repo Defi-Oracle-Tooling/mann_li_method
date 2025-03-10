@@ -1,0 +1,152 @@
+/* 
+ * Mann Li Method - 3D Pure CSS Multilayer Parallax
+ * Core parallax container styles
+ */
+
+.parallax-container {
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  perspective: 1px;
+  perspective-origin: center top;
+  transform-style: preserve-3d;
+  position: relative;
+}
+
+.parallax-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transform-origin: center top;
+  will-change: transform;
+}
+
+/* Apply different transform depths based on data-depth attribute */
+.parallax-layer[data-depth="0.1"] { transform: translateZ(-10px) scale(11); }
+.parallax-layer[data-depth="0.2"] { transform: translateZ(-5px) scale(6); }
+.parallax-layer[data-depth="0.5"] { transform: translateZ(-2px) scale(3); }
+.parallax-layer[data-depth="0.8"] { transform: translateZ(-0.5px) scale(1.5); }
+.parallax-layer[data-depth="1.0"] { transform: translateZ(0); }
+
+/* 
+ * Visual layer designs with financial/blockchain theme
+ */
+
+/* Background gradient layer */
+.layer-bg {
+  background: linear-gradient(135deg, #3a86ff 0%, #8338ec 100%);
+  opacity: 0.8;
+}
+
+/* Grid pattern layer - representing blockchain structure */
+.layer-1 {
+  background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Floating hexagons layer - representing blockchain nodes */
+.layer-2 {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><polygon points="50,10 90,35 90,75 50,100 10,75 10,35" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="2"/></svg>');
+  background-size: 100px 100px;
+  background-repeat: repeat;
+}
+
+/* Particles/dots layer - representing financial data points */
+.layer-3 {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.2) 2px, transparent 2px);
+  background-size: 30px 30px;
+  animation: float 15s ease-in-out infinite;
+}
+
+/* Content layer styling */
+.layer-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  padding: 2rem;
+  z-index: 10;
+  height: 100vh;
+}
+
+/* 
+ * Animation effects for enhanced parallax experience
+ */
+@keyframes float {
+  0% { transform: translateY(0px) translateZ(-0.5px) scale(1.5); }
+  50% { transform: translateY(-10px) translateZ(-0.5px) scale(1.5); }
+  100% { transform: translateY(0px) translateZ(-0.5px) scale(1.5); }
+}
+
+/* 
+ * Mobile optimizations
+ */
+@media (max-width: 768px) {
+  .parallax-container {
+    perspective: 0.5px; /* Reduce the perspective effect on smaller screens */
+  }
+  
+  /* Adjust scale factors for mobile */
+  .parallax-layer[data-depth="0.1"] { transform: translateZ(-5px) scale(6); }
+  .parallax-layer[data-depth="0.2"] { transform: translateZ(-3px) scale(4); }
+  .parallax-layer[data-depth="0.5"] { transform: translateZ(-1px) scale(2); }
+  .parallax-layer[data-depth="0.8"] { transform: translateZ(-0.3px) scale(1.3); }
+  
+  /* Adjust content for mobile */
+  .layer-content {
+    padding: 1rem;
+  }
+}
+
+/* 
+ * Performance considerations
+ */
+@media (prefers-reduced-motion: reduce) {
+  .parallax-layer {
+    transform: none !important;
+    animation: none !important;
+  }
+  
+  .parallax-container {
+    perspective: none;
+    overflow: auto;
+  }
+  
+  .layer-content {
+    position: relative;
+    height: auto;
+  }
+}
+
+/* Additional blockchain-themed elements */
+.layer-2::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path d="M20,100 L50,50 L100,30 L150,50 L180,100 L150,150 L100,170 L50,150 Z" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/></svg>');
+  background-size: 200px 200px;
+  background-repeat: repeat;
+  opacity: 0.5;
+}
+
+/* Financial graph pattern */
+.layer-1::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="100" viewBox="0 0 300 100"><polyline points="0,80 50,60 100,70 150,40 200,50 250,30 300,20" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="2"/></svg>');
+  background-size: 300px 100px;
+  background-repeat: repeat-x;
+  background-position: center;
+  opacity: 0.7;
+}
