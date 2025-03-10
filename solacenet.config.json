@@ -1,0 +1,17 @@
+{
+  "name": "mann_li_method",
+  "version": "1.0.0",
+  "description": "Mann Li Method for financial structuring as a SolaceNet submodule",
+  "submodulePath": "libs/mann_li_method",
+  "dependencies": {
+    "openzeppelin-contracts": "^5.0.0",
+    "forge-std": "latest"
+  },
+  "remappings": {
+    "@mann_li_method/": "libs/mann_li_method/contracts/"
+  },
+  "exports": {
+    "contracts": "./contracts",
+    "types": "./types"
+  }
+}
