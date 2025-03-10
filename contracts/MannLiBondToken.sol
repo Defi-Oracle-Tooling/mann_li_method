@@ -35,6 +35,7 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
     mapping(address => BondParams) public bondHolders;
     mapping(address => bool) public transferRestricted;
     mapping(uint256 => BondSeries) public bondSeries;
+    mapping(address => uint256) public lastActionTime; // For rate limiting
     
     uint256 public totalBondsIssued;
     uint256 public nextSeriesId = 1;
@@ -45,9 +46,20 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
     event CouponPaid(address indexed holder, uint256 amount, uint256 rate);
     event BondMaturityClaimed(address indexed holder, uint256 amount, uint256 maturityDate);
     event BondRedeemed(address indexed holder, uint256 amount, string reason);
+    event BondRedeemedEarly(address indexed holder, uint256 amount, uint256 redemptionAmount, uint256 penalty);
     event TransferRestrictionSet(address indexed holder, bool restricted);
     event BondSeriesCreated(uint256 indexed seriesId, string name, uint256 initialRate, uint256 stepDownRate);
     event BondSeriesUpdated(uint256 indexed seriesId, bool active);
+    event SeriesRatesAdjusted(uint256 indexed seriesId, uint256 oldInitialRate, uint256 newInitialRate, uint256 oldStepDownRate, uint256 newStepDownRate);
+
+    modifier rateLimited() {
+        require(
+            block.timestamp >= lastActionTime[msg.sender] + 1 hours,
+            "Rate limit: Too many actions"
+        );
+        lastActionTime[msg.sender] = block.timestamp;
+        _;
+    }
 
     constructor() ERC20("Mann Li Bond", "MLB") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -265,5 +277,52 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
 
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
+    }
+    
+    function adjustSeriesRates(
+        uint256 seriesId,
+        uint256 newInitialRate,
+        uint256 newStepDownRate
+    ) 
+        external 
+        onlyRole(RATE_MANAGER_ROLE)
+        rateLimited 
+    {
+        require(seriesId > 0 && seriesId < nextSeriesId, "Invalid series ID");
+        require(newInitialRate > 0 && newInitialRate <= 2000, "Invalid initial rate"); // Max 20%
+        require(newStepDownRate > 0 && newStepDownRate <= newInitialRate, "Invalid step-down rate");
+        
+        BondSeries storage series = bondSeries[seriesId];
+        
+        // Store old rates for event
+        uint256 oldInitialRate = series.initialRate;
+        uint256 oldStepDownRate = series.stepDownRate;
+        
+        // Update rates
+        series.initialRate = newInitialRate;
+        series.stepDownRate = newStepDownRate;
+        
+        emit SeriesRatesAdjusted(seriesId, oldInitialRate, newInitialRate, oldStepDownRate, newStepDownRate);
+    }
+    
+    function redeemEarly(uint256 amount) 
+        external 
+        whenNotPaused 
+    {
+        require(amount > 0, "Invalid amount");
+        require(balanceOf(msg.sender) >= amount, "Insufficient balance");
+        
+        BondParams storage params = bondHolders[msg.sender];
+        require(params.issueDate > 0, "No bonds held");
+        require(!params.maturityClaimed, "Maturity already claimed");
+        
+        // Calculate early redemption penalty (10% of amount)
+        uint256 penalty = (amount * 1000) / RATE_DENOMINATOR;
+        uint256 redemptionAmount = amount - penalty;
+        
+        // Burn the full amount but only return the redemption amount
+        _burn(msg.sender, amount);
+        
+        emit BondRedeemedEarly(msg.sender, amount, redemptionAmount, penalty);
     }
 }
