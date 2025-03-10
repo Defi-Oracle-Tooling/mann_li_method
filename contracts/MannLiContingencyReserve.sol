@@ -1,15 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { AccessControl } from "@openzeppelin/contracts/access/AccessControl.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title MannLiContingencyReserve
  * @dev Manages the 20% contingency reserve allocation for risk mitigation
  */
 contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
+    // Custom errors for gas optimization
+    error NoFundsSent();
+    error InvalidEmergencyLevel(uint256 level);
+    error NotInEmergencyMode();
+    error AlreadyInEmergencyMode();
+    error ReservesBelowMinimumThreshold();
+    error CooldownPeriodNotElapsed(uint256 nextAllowedTime);
+    error AmountExceedsMaximum(uint256 amount, uint256 maximum);
+    error WithdrawalBreachesMinimumThreshold(uint256 remaining, uint256 minimum);
+    error DailyWithdrawalLimitExceeded(uint256 requested, uint256 remaining);
+    error RateLimitError(uint256 nextAllowedTime);
+    error TransferFailed();
+    error InvalidMaxAmount();
+    error DailyLimitTooLow(uint256 dailyLimit, uint256 maxAmount);
+    error InvalidCooldownPeriod();
+    error InvalidThreshold();
     bytes32 public constant RISK_MANAGER_ROLE = keccak256("RISK_MANAGER_ROLE");
     
     struct ReservePool {
@@ -63,44 +79,38 @@ contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
     }
 
     modifier rateLimited() {
-        require(
-            block.timestamp >= lastActionTime[msg.sender] + 1 hours,
-            "Rate limit: Too many actions"
-        );
+        if (block.timestamp < lastActionTime[msg.sender] + 1 hours)
+            revert RateLimitError(lastActionTime[msg.sender] + 1 hours);
         lastActionTime[msg.sender] = block.timestamp;
         _;
     }
 
     modifier checkDailyLimit(uint256 amount) {
         uint256 today = block.timestamp / 1 days;
-        require(
-            dailyWithdrawals[today] + amount <= withdrawalLimit.dailyLimit,
-            "Daily withdrawal limit exceeded"
-        );
+        if (dailyWithdrawals[today] + amount > withdrawalLimit.dailyLimit)
+            revert DailyWithdrawalLimitExceeded(amount, withdrawalLimit.dailyLimit - dailyWithdrawals[today]);
         _;
         dailyWithdrawals[today] += amount;
     }
 
     function fundReserve() external payable nonReentrant whenNotPaused {
-        require(msg.value > 0, "Must send funds");
+        if (msg.value == 0) revert NoFundsSent();
         pool.totalReserves += msg.value;
         emit ReserveFunded(msg.value, block.timestamp);
     }
 
     function setEmergencyMode(bool status, uint256 level) external onlyRole(RISK_MANAGER_ROLE) {
-        require(level <= MAX_EMERGENCY_LEVEL, "Invalid emergency level");
+        if (level > MAX_EMERGENCY_LEVEL) revert InvalidEmergencyLevel(level);
         
         if (!status) {
-            require(pool.emergencyMode, "Not in emergency mode");
-            require(pool.totalReserves >= pool.minimumThreshold, "Reserves below minimum threshold");
+            if (!pool.emergencyMode) revert NotInEmergencyMode();
+            if (pool.totalReserves < pool.minimumThreshold) revert ReservesBelowMinimumThreshold();
         } else {
-            require(!pool.emergencyMode, "Already in emergency mode");
+            if (pool.emergencyMode) revert AlreadyInEmergencyMode();
         }
 
-        require(
-            lastActionTime[msg.sender] + 1 hours <= block.timestamp,
-            "Rate limit: Too many actions"
-        );
+        if (block.timestamp < lastActionTime[msg.sender] + 1 hours)
+            revert RateLimitError(lastActionTime[msg.sender] + 1 hours);
         lastActionTime[msg.sender] = block.timestamp;
         
         pool.emergencyMode = status;
@@ -114,26 +124,21 @@ contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
         uint256 amount,
         string memory reason
     ) external onlyRole(RISK_MANAGER_ROLE) {
-        require(pool.emergencyMode, "Not in emergency mode");
-        require(
-            block.timestamp >= pool.lastWithdrawalTime + withdrawalLimit.cooldownPeriod,
-            "Cooldown period not elapsed"
-        );
-        require(amount <= withdrawalLimit.maxAmount, "Amount exceeds maximum");
+        if (!pool.emergencyMode) revert NotInEmergencyMode();
+        if (block.timestamp < pool.lastWithdrawalTime + withdrawalLimit.cooldownPeriod)
+            revert CooldownPeriodNotElapsed(pool.lastWithdrawalTime + withdrawalLimit.cooldownPeriod);
+        if (amount > withdrawalLimit.maxAmount) revert AmountExceedsMaximum(amount, withdrawalLimit.maxAmount);
         
         uint256 remainingReserves = pool.totalReserves - amount;
-        require(remainingReserves >= pool.minimumThreshold, "Withdrawal would breach minimum threshold");
+        if (remainingReserves < pool.minimumThreshold) 
+            revert WithdrawalBreachesMinimumThreshold(remainingReserves, pool.minimumThreshold);
         
         uint256 today = block.timestamp / 1 days;
-        require(
-            dailyWithdrawals[today] + amount <= withdrawalLimit.dailyLimit,
-            "Daily withdrawal limit exceeded"
-        );
+        if (dailyWithdrawals[today] + amount > withdrawalLimit.dailyLimit)
+            revert DailyWithdrawalLimitExceeded(amount, withdrawalLimit.dailyLimit - dailyWithdrawals[today]);
 
-        require(
-            lastActionTime[msg.sender] + 1 hours <= block.timestamp,
-            "Rate limit: Too many actions"
-        );
+        if (block.timestamp < lastActionTime[msg.sender] + 1 hours)
+            revert RateLimitError(lastActionTime[msg.sender] + 1 hours);
         lastActionTime[msg.sender] = block.timestamp;
         
         pool.totalReserves = remainingReserves;
@@ -142,7 +147,7 @@ contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
         dailyWithdrawals[today] += amount;
 
         (bool success,) = recipient.call{value: amount}("");
-        require(success, "Transfer failed");
+        if (!success) revert TransferFailed();
 
         emit EmergencyWithdrawal(amount, reason, pool.emergencyLevel);
     }
@@ -152,9 +157,9 @@ contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
         uint256 _dailyLimit,
         uint256 _cooldownPeriod
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_maxAmount > 0, "Invalid max amount");
-        require(_dailyLimit >= _maxAmount, "Daily limit too low");
-        require(_cooldownPeriod > 0, "Invalid cooldown period");
+        if (_maxAmount == 0) revert InvalidMaxAmount();
+        if (_dailyLimit < _maxAmount) revert DailyLimitTooLow(_dailyLimit, _maxAmount);
+        if (_cooldownPeriod == 0) revert InvalidCooldownPeriod();
         
         withdrawalLimit = WithdrawalLimit({
             maxAmount: _maxAmount,
@@ -192,7 +197,7 @@ contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
         onlyRole(DEFAULT_ADMIN_ROLE) 
         rateLimited
     {
-        require(newThreshold > 0, "Invalid threshold");
+        if (newThreshold == 0) revert InvalidThreshold();
         pool.minimumThreshold = newThreshold;
     }
 

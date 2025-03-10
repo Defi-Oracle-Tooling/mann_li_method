@@ -109,7 +109,13 @@ contract MannLiContingencyReserveTest is Test {
         
         // Try to withdraw before cooldown elapsed
         vm.prank(riskManager);
-        vm.expectRevert("Cooldown period not elapsed");
+        // Use hardcoded timestamp for cooldown period error to match the contract implementation
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MannLiContingencyReserve.CooldownPeriodNotElapsed.selector,
+                90001
+            )
+        );
         reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
         
         // Wait cooldown period
@@ -121,7 +127,13 @@ contract MannLiContingencyReserveTest is Test {
         
         // Try to withdraw again immediately
         vm.prank(riskManager);
-        vm.expectRevert("Cooldown period not elapsed");
+        // Use hardcoded timestamp for cooldown period error to match the contract implementation
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MannLiContingencyReserve.CooldownPeriodNotElapsed.selector,
+                90001
+            )
+        );
         reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
         
         // Verify withdrawal amount
@@ -162,7 +174,13 @@ contract MannLiContingencyReserveTest is Test {
         
         // Try to withdraw too much (would breach minimum threshold)
         vm.prank(riskManager);
-        vm.expectRevert("Amount exceeds maximum");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MannLiContingencyReserve.AmountExceedsMaximum.selector,
+                2 ether,
+                1.25 ether
+            )
+        );
         reserve.withdrawEmergencyFunds(payable(riskManager), 2 ether, "Test threshold");
     }
 
@@ -181,7 +199,13 @@ contract MannLiContingencyReserveTest is Test {
         
         // Try to change emergency level immediately (should fail due to rate limiting)
         vm.prank(riskManager);
-        vm.expectRevert("Rate limit: Too many actions");
+        // Use hardcoded timestamp for rate limit error to match the contract implementation
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MannLiContingencyReserve.RateLimitError.selector,
+                7201
+            )
+        );
         reserve.setEmergencyMode(false, 0);
         
         // Wait for rate limit to expire
