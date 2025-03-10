@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./MannLiBondToken.sol";
 
 /**
  * @title MannLiReinvestment
  * @dev Manages reinvestment of bond yields and buyback mechanisms
  */
-contract MannLiReinvestment is AccessControl, ReentrancyGuard {
+contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
     
     MannLiBondToken public bondToken;
@@ -116,7 +117,7 @@ contract MannLiReinvestment is AccessControl, ReentrancyGuard {
         require(reinvestAmount > 0, "Reinvestment amount too small");
 
         try this.executeReinvestment(reinvestAmount) {
-            pool.totalFunds += reinvestAmount;
+            // Note: executeReinvestment already updates pool.totalFunds
             pool.totalReinvested += reinvestAmount;
             pool.lastReinvestmentTime = block.timestamp;
             
@@ -126,10 +127,11 @@ contract MannLiReinvestment is AccessControl, ReentrancyGuard {
         }
     }
 
-    function executeReinvestment(uint256 amount) external {
+    function executeReinvestment(uint256 _amount) external {
         require(msg.sender == address(this), "Only internal calls");
-        // Implementation of reinvestment strategy
-        // This could involve various DeFi protocols or yield farming strategies
+        // Store the amount in the pool's totalFunds since this is
+        // a placeholder for future DeFi integrations
+        pool.totalFunds += _amount;
     }
 
     function executeBuyback(address holder, uint256 amount) 

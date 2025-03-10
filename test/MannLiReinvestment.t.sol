@@ -11,6 +11,8 @@ contract MannLiReinvestmentTest is Test {
     address public admin;
     address public manager;
     address public holder;
+    uint256 public constant INITIAL_AMOUNT = 10 ether;
+    uint256 public constant REINVEST_AMOUNT = 20 ether;
     
     function setUp() public {
         admin = makeAddr("admin");
@@ -25,8 +27,9 @@ contract MannLiReinvestmentTest is Test {
         reinvestment = new MannLiReinvestment(address(bondToken));
         reinvestment.grantRole(reinvestment.MANAGER_ROLE(), manager);
         
-        // Grant issuer role to manager for bond token
+        // Grant issuer role to manager and reinvestment contract for bond token
         bondToken.grantRole(bondToken.ISSUER_ROLE(), manager);
+        bondToken.grantRole(bondToken.ISSUER_ROLE(), address(reinvestment));
         vm.stopPrank();
 
         // Fund accounts
@@ -34,10 +37,13 @@ contract MannLiReinvestmentTest is Test {
         vm.deal(holder, 100 ether);
     }
 
-    function test_InitialState() public {
+    function test_InitialState() public view {
         assertEq(address(reinvestment.bondToken()), address(bondToken));
-        (,,, uint256 rate) = reinvestment.getReinvestmentStats();
-        assertEq(rate, 3000); // 30% default rate
+        (uint256 totalReinvested, uint256 totalBuybacks, uint256 currentFunds, uint256 reinvestmentRate) = reinvestment.getReinvestmentStats();
+        assertEq(totalReinvested, 0);
+        assertEq(totalBuybacks, 0);
+        assertEq(currentFunds, 0);
+        assertEq(reinvestmentRate, 3000); // 30% default rate
     }
 
     function test_ReinvestmentRate() public {
@@ -50,24 +56,18 @@ contract MannLiReinvestmentTest is Test {
     }
 
     function test_YieldReinvestment() public {
-        uint256 yieldAmount = 10 ether;
-        
-        // Send yield to contract
-        vm.prank(manager);
-        (bool success,) = address(reinvestment).call{value: yieldAmount}("");
-        assertTrue(success);
+        payable(address(reinvestment)).transfer(REINVEST_AMOUNT);
 
-        // Reinvest yield
         vm.prank(manager);
         reinvestment.reinvestYield();
 
         (uint256 totalReinvested,,uint256 currentFunds,) = reinvestment.getReinvestmentStats();
-        assertEq(currentFunds, 3 ether); // 30% of 10 ETH
-        assertEq(totalReinvested, 3 ether);
+        assertEq(totalReinvested, (REINVEST_AMOUNT * 3000) / 10000); // 30% of REINVEST_AMOUNT
+        assertEq(currentFunds, (REINVEST_AMOUNT * 3000) / 10000);
     }
 
     function test_Buyback() public {
-        uint256 bondAmount = 10 ether;
+        uint256 bondAmount = 5 ether; // Reduced to be less than reinvested amount
         
         // Issue bonds to holder
         vm.prank(manager);
@@ -78,18 +78,26 @@ contract MannLiReinvestmentTest is Test {
         (bool success,) = address(reinvestment).call{value: 20 ether}("");
         assertTrue(success);
 
+        // Reinvest funds first
+        vm.prank(manager);
+        reinvestment.reinvestYield();
+
         // Approve reinvestment contract
         vm.prank(holder);
         bondToken.approve(address(reinvestment), bondAmount);
+
+        // Warp time to handle cooldown period
+        vm.warp(block.timestamp + 31 days);
 
         // Execute buyback
         vm.prank(manager);
         reinvestment.executeBuyback(holder, bondAmount);
 
         (,uint256 totalBuybacks,uint256 currentFunds,) = reinvestment.getReinvestmentStats();
-        assertGt(totalBuybacks, 0);
-        assertLt(currentFunds, 20 ether);
+        assertEq(totalBuybacks, bondAmount);
         assertEq(bondToken.balanceOf(holder), 0);
+        // Should have deducted the buyback amount (minus discount) from currentFunds
+        assertEq(currentFunds, (20 ether * 3000 / 10000) - (bondAmount * 9500 / 10000));
     }
 
     function testFuzz_ReinvestmentWithinBounds(uint256 rate) public {

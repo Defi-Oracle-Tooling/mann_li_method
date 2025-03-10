@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title MannLiContingencyReserve
  * @dev Manages the 20% contingency reserve allocation for risk mitigation
  */
-contract MannLiContingencyReserve is AccessControl, ReentrancyGuard, Pausable {
+contract MannLiContingencyReserve is ReentrancyGuard, AccessControl, Pausable {
     bytes32 public constant RISK_MANAGER_ROLE = keccak256("RISK_MANAGER_ROLE");
     
     struct ReservePool {
@@ -87,64 +87,63 @@ contract MannLiContingencyReserve is AccessControl, ReentrancyGuard, Pausable {
         emit ReserveFunded(msg.value, block.timestamp);
     }
 
-    function setEmergencyMode(bool status, uint256 level) 
-        external 
-        onlyRole(RISK_MANAGER_ROLE)
-        rateLimited 
-    {
+    function setEmergencyMode(bool status, uint256 level) external onlyRole(RISK_MANAGER_ROLE) {
         require(level <= MAX_EMERGENCY_LEVEL, "Invalid emergency level");
-        if (status) {
-            require(!pool.emergencyMode, "Already in emergency mode");
-            pool.emergencyMode = true;
-            pool.emergencyLevel = level;
-        } else {
+        
+        if (!status) {
             require(pool.emergencyMode, "Not in emergency mode");
-            require(
-                pool.totalReserves >= pool.minimumThreshold,
-                "Reserves below minimum threshold"
-            );
-            pool.emergencyMode = false;
-            pool.emergencyLevel = 0;
+            require(pool.totalReserves >= pool.minimumThreshold, "Reserves below minimum threshold");
+        } else {
+            require(!pool.emergencyMode, "Already in emergency mode");
         }
+
+        require(
+            lastActionTime[msg.sender] + 1 hours <= block.timestamp,
+            "Rate limit: Too many actions"
+        );
+        lastActionTime[msg.sender] = block.timestamp;
+        
+        pool.emergencyMode = status;
+        pool.emergencyLevel = level;
+        
         emit EmergencyModeUpdated(status, level, block.timestamp);
     }
 
     function withdrawEmergencyFunds(
         address payable recipient,
         uint256 amount,
-        string calldata reason
-    ) 
-        external 
-        nonReentrant 
-        onlyRole(RISK_MANAGER_ROLE)
-        checkDailyLimit(amount)
-        whenNotPaused 
-    {
+        string memory reason
+    ) external onlyRole(RISK_MANAGER_ROLE) {
         require(pool.emergencyMode, "Not in emergency mode");
         require(
             block.timestamp >= pool.lastWithdrawalTime + withdrawalLimit.cooldownPeriod,
             "Cooldown period not elapsed"
         );
         require(amount <= withdrawalLimit.maxAmount, "Amount exceeds maximum");
-        require(amount <= pool.totalReserves, "Insufficient reserves");
-        require(recipient != address(0), "Invalid recipient");
         
-        // Adjust withdrawal limit based on emergency level
-        uint256 adjustedLimit = withdrawalLimit.maxAmount;
-        if (pool.emergencyLevel == 2) {
-            adjustedLimit = (withdrawalLimit.maxAmount * 150) / 100; // 150%
-        } else if (pool.emergencyLevel == 3) {
-            adjustedLimit = (withdrawalLimit.maxAmount * 200) / 100; // 200%
-        }
-        require(amount <= adjustedLimit, "Amount exceeds emergency limit");
+        uint256 remainingReserves = pool.totalReserves - amount;
+        require(remainingReserves >= pool.minimumThreshold, "Withdrawal would breach minimum threshold");
         
-        pool.totalReserves -= amount;
-        pool.lastWithdrawalTime = block.timestamp;
+        uint256 today = block.timestamp / 1 days;
+        require(
+            dailyWithdrawals[today] + amount <= withdrawalLimit.dailyLimit,
+            "Daily withdrawal limit exceeded"
+        );
+
+        require(
+            lastActionTime[msg.sender] + 1 hours <= block.timestamp,
+            "Rate limit: Too many actions"
+        );
+        lastActionTime[msg.sender] = block.timestamp;
+        
+        pool.totalReserves = remainingReserves;
         pool.totalWithdrawals += amount;
-        
-        (bool success, ) = recipient.call{value: amount}("");
+        pool.lastWithdrawalTime = block.timestamp;
+        dailyWithdrawals[today] += amount;
+
+        (bool success,) = recipient.call{value: amount}("");
         require(success, "Transfer failed");
-        
+
         emit EmergencyWithdrawal(amount, reason, pool.emergencyLevel);
     }
 

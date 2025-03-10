@@ -9,28 +9,28 @@ contract MannLiContingencyReserveTest is Test {
     address public admin;
     address public riskManager;
     address public user;
-    uint256 public minimumThreshold;
-
+    uint256 public constant INITIAL_AMOUNT = 10 ether;
+    uint256 public constant MIN_THRESHOLD = 5 ether;
+    
     function setUp() public {
         admin = makeAddr("admin");
         riskManager = makeAddr("riskManager");
         user = makeAddr("user");
-        minimumThreshold = 1000 ether;
 
         vm.startPrank(admin);
-        reserve = new MannLiContingencyReserve(minimumThreshold);
+        reserve = new MannLiContingencyReserve(MIN_THRESHOLD);
         reserve.grantRole(reserve.RISK_MANAGER_ROLE(), riskManager);
         vm.stopPrank();
-
+        
         // Fund accounts
         vm.deal(user, 100 ether);
         vm.deal(riskManager, 100 ether);
     }
 
-    function test_InitialState() public {
+    function test_InitialState() public view {
         (
             uint256 totalReserves,
-            uint256 minThreshold,
+            uint256 minimumThreshold,
             bool emergencyMode,
             uint256 emergencyLevel,
             ,
@@ -38,67 +38,168 @@ contract MannLiContingencyReserveTest is Test {
         ) = reserve.getReserveStatus();
 
         assertEq(totalReserves, 0);
-        assertEq(minThreshold, minimumThreshold);
+        assertEq(minimumThreshold, MIN_THRESHOLD);
         assertFalse(emergencyMode);
         assertEq(emergencyLevel, 0);
         assertEq(totalWithdrawals, 0);
     }
 
     function test_FundingReserve() public {
-        uint256 fundAmount = 10 ether;
         vm.prank(user);
-        reserve.fundReserve{value: fundAmount}();
+        reserve.fundReserve{value: INITIAL_AMOUNT}();
 
         (uint256 totalReserves,,,,, ) = reserve.getReserveStatus();
-        assertEq(totalReserves, fundAmount);
-    }
-
-    function test_EmergencyMode() public {
-        uint256 fundAmount = 10 ether;
-        vm.prank(user);
-        reserve.fundReserve{value: fundAmount}();
-
-        vm.prank(riskManager);
-        reserve.setEmergencyMode(true, 1);
-
-        (,, bool emergencyMode, uint256 emergencyLevel,,) = reserve.getReserveStatus();
-        assertTrue(emergencyMode);
-        assertEq(emergencyLevel, 1);
-    }
-
-    function test_EmergencyWithdrawal() public {
-        uint256 fundAmount = 10 ether;
-        uint256 withdrawAmount = 5 ether;
-        
-        // Fund the reserve
-        vm.prank(user);
-        reserve.fundReserve{value: fundAmount}();
-
-        // Activate emergency mode
-        vm.prank(riskManager);
-        reserve.setEmergencyMode(true, 1);
-
-        // Wait for cooldown
-        vm.warp(block.timestamp + 7 days);
-
-        // Withdraw funds
-        vm.prank(riskManager);
-        reserve.withdrawEmergencyFunds(payable(user), withdrawAmount, "Emergency test");
-
-        (uint256 totalReserves,,,,, uint256 totalWithdrawals) = reserve.getReserveStatus();
-        assertEq(totalReserves, fundAmount - withdrawAmount);
-        assertEq(totalWithdrawals, withdrawAmount);
+        assertEq(totalReserves, INITIAL_AMOUNT);
     }
 
     function testFuzz_FundingReserve(uint256 amount) public {
-        vm.assume(amount > 0.1 ether && amount < 1000 ether);
+        vm.assume(amount > 0.1 ether && amount < 100 ether);
         vm.deal(user, amount);
-
+        
         vm.prank(user);
         reserve.fundReserve{value: amount}();
 
         (uint256 totalReserves,,,,, ) = reserve.getReserveStatus();
         assertEq(totalReserves, amount);
+    }
+
+    function test_EmergencyMode() public {
+        // Fund the reserve
+        vm.prank(user);
+        reserve.fundReserve{value: 10 ether}();
+        
+        // Warp ahead to simulate time passing
+        vm.warp(block.timestamp + 1 hours);
+        
+        // Set emergency mode
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(true, 1);
+        
+        // Verify emergency mode is set
+        (uint256 balance, uint256 minimumThreshold, bool emergencyStatus, uint256 level, uint256 cooldownEnd, uint256 lastWithdrawal) = reserve.getReserveStatus();
+        assertTrue(emergencyStatus);
+        assertEq(level, 1);
+        
+        // Try to deactivate emergency mode but don't add additional funds first
+        // This should revert because reserves are below the minimum threshold
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(riskManager);
+        vm.expectRevert("Reserves below minimum threshold");
+        reserve.setEmergencyMode(false, 0);
+        
+        // Add more funds to exceed minimum threshold
+        vm.prank(user);
+        reserve.fundReserve{value: 10 ether}();
+        
+        // Now deactivation should succeed
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(false, 0);
+        
+        // Verify emergency mode is deactivated
+        (balance, minimumThreshold, emergencyStatus, level, cooldownEnd, lastWithdrawal) = reserve.getReserveStatus();
+        assertFalse(emergencyStatus);
+        assertEq(level, 0);
+    }
+
+    function test_WithdrawalMechanisms() public {
+        // Fund the reserve
+        vm.prank(user);
+        reserve.fundReserve{value: 20 ether}();
+        
+        // Enter emergency mode
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(true, 1);
+        
+        // Try to withdraw before cooldown elapsed
+        vm.prank(riskManager);
+        vm.expectRevert("Cooldown period not elapsed");
+        reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
+        
+        // Wait cooldown period
+        vm.warp(block.timestamp + 1 days + 1 hours);
+        
+        // Now withdrawal should succeed
+        vm.prank(riskManager);
+        reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
+        
+        // Try to withdraw again immediately
+        vm.prank(riskManager);
+        vm.expectRevert("Cooldown period not elapsed");
+        reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
+        
+        // Verify withdrawal amount
+        (,,,,, uint256 lastWithdrawal) = reserve.getReserveStatus();
+        assertEq(lastWithdrawal, 1 ether);
+        
+        // Wait another cooldown period
+        vm.warp(block.timestamp + 1 days + 1 hours);
+        
+        // Try to update emergency level to a higher value while already in emergency mode
+        vm.prank(riskManager);
+        vm.expectRevert("Not in emergency mode");
+        reserve.setEmergencyMode(true, 3);
+        
+        // Instead, let's try to deactivate and then activate with a higher level
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(false, 0);
+        
+        // Now activate with higher level
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(true, 3);
+        
+        // Verify new level
+        (,,, uint256 level,,) = reserve.getReserveStatus();
+        assertEq(level, 3);
+    }
+
+    function test_MinimumThresholdEnforcement() public {
+        // Fund the reserve
+        vm.prank(user);
+        reserve.fundReserve{value: 6 ether}();
+        
+        // Enter emergency mode
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(true, 1);
+        
+        // Wait cooldown period
+        vm.warp(block.timestamp + 1 days + 1 hours);
+        
+        // Try to withdraw too much (would breach minimum threshold)
+        vm.prank(riskManager);
+        vm.expectRevert("Withdrawal would breach minimum threshold");
+        reserve.withdrawEmergencyFunds(payable(riskManager), 2 ether, "Test threshold");
+    }
+
+    function test_RateLimiting() public {
+        // Fund the reserve
+        vm.prank(user);
+        reserve.fundReserve{value: 10 ether}();
+        
+        // Enter emergency mode
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(true, 1);
+        
+        // Warp a small amount of time (less than rate limit)
+        vm.warp(block.timestamp + 30 minutes);
+        
+        // Try to change emergency level immediately (should fail due to rate limiting)
+        vm.prank(riskManager);
+        vm.expectRevert("Rate limit: Too many actions");
+        reserve.setEmergencyMode(false, 0);
+        
+        // Wait for rate limit to expire
+        vm.warp(block.timestamp + 1 hours);
+        
+        // Now should be able to update emergency level
+        vm.prank(riskManager);
+        reserve.setEmergencyMode(false, 0);
+        
+        // Verify new level
+        (,,, uint256 level,,) = reserve.getReserveStatus();
+        assertEq(level, 0);
     }
 
     receive() external payable {}

@@ -16,9 +16,6 @@
   ],
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "@openzeppelin/contracts": "5.0.1"
-  },
   "devDependencies": {
     "viem": "^2.7.8"
   },

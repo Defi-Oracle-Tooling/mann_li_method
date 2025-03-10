@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title MannLiBondToken
  * @dev Implementation of the Mann Li Method Bond Token with step-down rate model
  */
-contract MannLiBondToken is ERC20, AccessControl, Pausable {
+contract MannLiBondToken is ERC20Pausable, AccessControl {
     bytes32 public constant ISSUER_ROLE = keccak256("ISSUER_ROLE");
     
     struct BondParams {
@@ -123,13 +122,11 @@ contract MannLiBondToken is ERC20, AccessControl, Pausable {
         emit TransferRestrictionSet(holder, restricted);
     }
 
-    function _beforeTokenTransfer(
+    function _update(
         address from,
         address to,
         uint256 amount
     ) internal virtual override {
-        super._beforeTokenTransfer(from, to, amount);
-        
         // Check transfer restrictions
         if (from != address(0) && to != address(0)) { // Exclude minting and burning
             require(!transferRestricted[from], "Sender is restricted");
@@ -142,6 +139,7 @@ contract MannLiBondToken is ERC20, AccessControl, Pausable {
                 "Transfer locked during initial period"
             );
         }
+        super._update(from, to, amount);
     }
 
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
