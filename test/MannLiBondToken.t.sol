@@ -150,10 +150,10 @@ contract MannLiBondTokenTest is Test {
         
         // Verify operations are blocked when paused
         vm.startPrank(issuer);
-        vm.expectRevert("Pausable: paused");
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         bondToken.issueBond(holder1, amount);
         
-        vm.expectRevert("Pausable: paused");
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         bondToken.payCoupon(holder1);
         vm.stopPrank();
         
@@ -163,7 +163,7 @@ contract MannLiBondTokenTest is Test {
         vm.warp(block.timestamp + 31 days);
         
         vm.prank(holder1);
-        vm.expectRevert("Pausable: paused");
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         bondToken.transfer(holder2, amount);
         
         // Unpause and verify operations work again

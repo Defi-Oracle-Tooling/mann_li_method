@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
  */
 contract MannLiBondToken is ERC20Pausable, AccessControl {
     bytes32 public constant ISSUER_ROLE = keccak256("ISSUER_ROLE");
+    bytes32 public constant RATE_MANAGER_ROLE = keccak256("RATE_MANAGER_ROLE");
     
     struct BondParams {
         uint256 issueDate;
@@ -18,24 +19,87 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         uint256 stepDownRate;   // Reduced rate after 5 years (7.75%)
         uint256 stepDownDate;   // Date when rate steps down
         bool maturityClaimed;   // Whether the bond has been redeemed at maturity
+        uint256 seriesId;       // Bond series identifier
+    }
+    
+    // Bond series support
+    struct BondSeries {
+        string name;
+        uint256 initialRate;
+        uint256 stepDownRate;
+        uint256 maturityPeriod; // In days
+        uint256 stepDownPeriod; // In days
+        bool active;
     }
 
     mapping(address => BondParams) public bondHolders;
     mapping(address => bool) public transferRestricted;
+    mapping(uint256 => BondSeries) public bondSeries;
     
     uint256 public totalBondsIssued;
+    uint256 public nextSeriesId = 1;
     uint256 public constant RATE_DENOMINATOR = 10000; // For handling percentages
     uint256 public constant TRANSFER_LOCKUP_PERIOD = 30 days;
 
-    event BondIssued(address indexed holder, uint256 amount, uint256 issueDate, uint256 maturityDate);
+    event BondIssued(address indexed holder, uint256 amount, uint256 issueDate, uint256 maturityDate, uint256 seriesId);
     event CouponPaid(address indexed holder, uint256 amount, uint256 rate);
     event BondMaturityClaimed(address indexed holder, uint256 amount, uint256 maturityDate);
     event BondRedeemed(address indexed holder, uint256 amount, string reason);
     event TransferRestrictionSet(address indexed holder, bool restricted);
+    event BondSeriesCreated(uint256 indexed seriesId, string name, uint256 initialRate, uint256 stepDownRate);
+    event BondSeriesUpdated(uint256 indexed seriesId, bool active);
 
     constructor() ERC20("Mann Li Bond", "MLB") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ISSUER_ROLE, msg.sender);
+        _grantRole(RATE_MANAGER_ROLE, msg.sender);
+        
+        // Create default bond series
+        _createBondSeries(
+            "Series A",
+            1000,   // 10.00% initial rate
+            775,    // 7.75% step-down rate
+            3650,   // 10 years maturity
+            1825    // 5 years step-down
+        );
+    }
+    
+    function createBondSeries(
+        string calldata name,
+        uint256 initialRate,
+        uint256 stepDownRate,
+        uint256 maturityPeriod,
+        uint256 stepDownPeriod
+    ) external onlyRole(RATE_MANAGER_ROLE) returns (uint256) {
+        return _createBondSeries(name, initialRate, stepDownRate, maturityPeriod, stepDownPeriod);
+    }
+    
+    function _createBondSeries(
+        string memory name,
+        uint256 initialRate,
+        uint256 stepDownRate,
+        uint256 maturityPeriod,
+        uint256 stepDownPeriod
+    ) internal returns (uint256) {
+        require(initialRate > 0 && initialRate <= 2000, "Invalid initial rate"); // Max 20%
+        require(stepDownRate > 0 && stepDownRate <= initialRate, "Invalid step-down rate");
+        require(maturityPeriod > 0, "Invalid maturity period");
+        require(stepDownPeriod > 0 && stepDownPeriod < maturityPeriod, "Invalid step-down period");
+        
+        uint256 seriesId = nextSeriesId++;
+        
+        bondSeries[seriesId] = BondSeries({
+            name: name,
+            initialRate: initialRate,
+            stepDownRate: stepDownRate,
+            maturityPeriod: maturityPeriod * 1 days,
+            stepDownPeriod: stepDownPeriod * 1 days,
+            active: true
+        });
+        
+        emit BondSeriesCreated(seriesId, name, initialRate, stepDownRate);
+        
+        return seriesId;
     }
 
     function issueBond(address to, uint256 amount) 
@@ -43,23 +107,36 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         onlyRole(ISSUER_ROLE) 
         whenNotPaused 
     {
+        // Use default series (1)
+        issueBondFromSeries(to, amount, 1);
+    }
+    
+    function issueBondFromSeries(address to, uint256 amount, uint256 seriesId)
+        public
+        onlyRole(ISSUER_ROLE)
+        whenNotPaused
+    {
         require(to != address(0), "Invalid address");
         require(amount > 0, "Invalid amount");
-
+        require(bondSeries[seriesId].active, "Bond series not active");
+        
+        BondSeries memory series = bondSeries[seriesId];
+        
         BondParams memory params = BondParams({
             issueDate: block.timestamp,
-            maturityDate: block.timestamp + 3650 days, // 10 years
-            initialRate: 1000,                         // 10.00%
-            stepDownRate: 775,                         // 7.75%
-            stepDownDate: block.timestamp + 1825 days, // 5 years
-            maturityClaimed: false
+            maturityDate: block.timestamp + series.maturityPeriod,
+            initialRate: series.initialRate,
+            stepDownRate: series.stepDownRate,
+            stepDownDate: block.timestamp + series.stepDownPeriod,
+            maturityClaimed: false,
+            seriesId: seriesId
         });
 
         bondHolders[to] = params;
         totalBondsIssued += amount;
         _mint(to, amount);
 
-        emit BondIssued(to, amount, block.timestamp, params.maturityDate);
+        emit BondIssued(to, amount, block.timestamp, params.maturityDate, seriesId);
     }
 
     function getCurrentRate(address holder) public view returns (uint256) {
@@ -98,7 +175,13 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
         uint256 balance = balanceOf(msg.sender);
         require(balance > 0, "No bonds to claim");
         
+        // Transfer principal amount back to the holder
         params.maturityClaimed = true;
+        
+        // Mint additional tokens as final payment (principal remains intact)
+        uint256 finalPayment = (balance * 500) / RATE_DENOMINATOR; // 5% final bonus
+        _mint(msg.sender, finalPayment);
+        
         emit BondMaturityClaimed(msg.sender, balance, params.maturityDate);
     }
 
@@ -120,6 +203,40 @@ contract MannLiBondToken is ERC20Pausable, AccessControl {
     {
         transferRestricted[holder] = restricted;
         emit TransferRestrictionSet(holder, restricted);
+    }
+    
+    function setBondSeriesStatus(uint256 seriesId, bool active)
+        external
+        onlyRole(RATE_MANAGER_ROLE)
+    {
+        require(seriesId > 0 && seriesId < nextSeriesId, "Invalid series ID");
+        bondSeries[seriesId].active = active;
+        emit BondSeriesUpdated(seriesId, active);
+    }
+    
+    function getBondSeriesInfo(uint256 seriesId) 
+        external 
+        view 
+        returns (
+            string memory name,
+            uint256 initialRate,
+            uint256 stepDownRate,
+            uint256 maturityPeriod,
+            uint256 stepDownPeriod,
+            bool active
+        ) 
+    {
+        require(seriesId > 0 && seriesId < nextSeriesId, "Invalid series ID");
+        BondSeries memory series = bondSeries[seriesId];
+        
+        return (
+            series.name,
+            series.initialRate,
+            series.stepDownRate,
+            series.maturityPeriod / 1 days,
+            series.stepDownPeriod / 1 days,
+            series.active
+        );
     }
 
     function _update(
