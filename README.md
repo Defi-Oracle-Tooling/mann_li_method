@@ -265,6 +265,26 @@ script/            # Deployment scripts
 - Governance framework for decentralized parameter updates
 - Secondary market features for improved bond liquidity
 
+## 📦 Submodule Integration
+
+This repository can be integrated as a submodule in the SolaceNet mono-repository while maintaining standalone functionality.
+
+### Adding as a Submodule
+
+```shell
+# Add the submodule to SolaceNet
+git submodule add https://github.com/Defi-Oracle-Tooling/mann_li_method.git libs/mann_li_method
+
+# Initialize and update the submodule
+git submodule update --init --recursive
+
+# Configure the submodule for SolaceNet integration
+cd libs/mann_li_method
+pnpm run submodule:setup
+```
+
+For detailed integration instructions, see [Submodule Integration Guide](docs/SUBMODULE_INTEGRATION.md).
+
 ## 📜 License
 
 MIT

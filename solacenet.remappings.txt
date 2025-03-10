@@ -1,0 +1,4 @@
+@mann_li_method/=libs/mann_li_method/contracts/
+@openzeppelin/contracts/=libs/mann_li_method/lib/openzeppelin-contracts/contracts/
+forge-std/=libs/mann_li_method/lib/forge-std/src/
+ds-test/=libs/mann_li_method/lib/forge-std/lib/ds-test/src/

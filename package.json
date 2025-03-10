@@ -7,7 +7,9 @@
     "test": "forge test",
     "build": "forge build",
     "deploy": "forge script script/Deploy.s.sol:Deploy --rpc-url ${RPC_URL} --private-key ${PRIVATE_KEY}",
-    "node": "anvil"
+    "node": "anvil",
+    "submodule:setup": "node scripts/update-submodule-paths.js --submodule",
+    "standalone:setup": "node scripts/update-submodule-paths.js"
   },
   "keywords": [
     "blockchain",
