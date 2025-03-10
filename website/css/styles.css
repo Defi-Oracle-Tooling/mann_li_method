@@ -1,0 +1,278 @@
+/*
+ * Mann Li Method - Main Styles
+ */
+
+/* Base Styles & Typography */
+:root {
+  --primary: #3a86ff;
+  --primary-dark: #2667cc;
+  --secondary: #8338ec;
+  --secondary-dark: #6a2cc0;
+  --light: #f8f9fa;
+  --dark: #212529;
+  --gray: #6c757d;
+  --success: #28a745;
+  --border-radius: 0.5rem;
+  --box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+  --transition: all 0.3s ease;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+  color: var(--dark);
+  overflow-x: hidden;
+  padding-top: 76px; /* Account for fixed navbar */
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 1rem;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+a:hover {
+  color: var(--primary-dark);
+}
+
+.btn {
+  border-radius: var(--border-radius);
+  padding: 0.5rem 1.5rem;
+  transition: var(--transition);
+  font-weight: 500;
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-dark);
+  border-color: var(--primary-dark);
+}
+
+.btn-outline-light {
+  color: white;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.btn-outline-light:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.btn-lg {
+  padding: 0.75rem 2rem;
+  font-size: 1.1rem;
+}
+
+/* Navbar */
+.navbar {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  transition: var(--transition);
+}
+
+.navbar-brand {
+  font-size: 1.5rem;
+}
+
+.nav-link {
+  font-weight: 500;
+  padding: 0.5rem 1rem !important;
+  transition: var(--transition);
+}
+
+.nav-link:hover {
+  color: var(--primary) !important;
+}
+
+/* Feature Icons */
+.feature-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.feature-icon i {
+  font-size: 1.5rem;
+  color: white;
+}
+
+/* Cards */
+.card {
+  border-radius: var(--border-radius);
+  transition: var(--transition);
+  border: none;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--box-shadow);
+}
+
+/* CTA Section */
+.cta-section {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  color: white;
+  padding: 5rem 0;
+}
+
+/* Footer */
+.footer {
+  background-color: var(--dark);
+  color: white;
+  padding: 5rem 0 2rem;
+}
+
+.footer a {
+  transition: var(--transition);
+}
+
+.footer a:hover {
+  color: white !important;
+  text-decoration: none;
+}
+
+/* Sections */
+section {
+  padding: 5rem 0;
+}
+
+.bg-light {
+  background-color: #f8f9fa !important;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 992px) {
+  h1.display-4 {
+    font-size: 2.5rem;
+  }
+  
+  section {
+    padding: 4rem 0;
+  }
+  
+  .feature-icon {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .feature-icon i {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    padding-top: 66px;
+  }
+  
+  h1.display-4 {
+    font-size: 2rem;
+  }
+  
+  section {
+    padding: 3rem 0;
+  }
+  
+  .btn-lg {
+    padding: 0.5rem 1.5rem;
+    font-size: 1rem;
+  }
+  
+  .cta-section {
+    padding: 3rem 0;
+  }
+  
+  .footer {
+    padding: 3rem 0 1.5rem;
+  }
+}
+
+@media (max-width: 576px) {
+  h1.display-4 {
+    font-size: 1.75rem;
+  }
+  
+  .lead {
+    font-size: 1rem;
+  }
+  
+  .feature-icon {
+    width: 45px;
+    height: 45px;
+    margin-bottom: 1rem;
+  }
+  
+  .feature-icon i {
+    font-size: 1rem;
+  }
+}
+
+/* Animations */
+.fade-in {
+  animation: fadeIn 1s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Accessibility */
+:focus {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Custom list styles */
+.list-unstyled i.fas.fa-check-circle {
+  color: var(--success);
+}
+
+/* Image styles */
+.img-fluid {
+  border-radius: var(--border-radius);
+  transition: var(--transition);
+}
+
+.rounded-4 {
+  border-radius: 1rem !important;
+}
+
+/* Testimonial avatars */
+.rounded-circle {
+  border: 3px solid var(--primary);
+}
+
+/* Additional utility classes */
+.shadow-sm {
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+}
+
+.text-primary {
+  color: var(--primary) !important;
+}
+
+.border-secondary {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Create a simple JavaScript file for any additional functionality */
