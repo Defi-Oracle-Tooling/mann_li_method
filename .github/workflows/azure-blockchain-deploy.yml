@@ -1,0 +1,54 @@
+name: Deploy Smart Contracts to Azure Blockchain
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'contracts/**'
+      - 'script/**'
+      - 'foundry.toml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+          
+      - name: Install dependencies
+        run: forge install
+        
+      - name: Build contracts
+        run: forge build --sizes
+        
+      - name: Run tests
+        run: forge test -vvv
+        
+      - name: Set up Azure CLI
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: Deploy to Azure Blockchain Service
+        run: |
+          # Set environment variables for deployment
+          export RPC_URL=${{ secrets.AZURE_BLOCKCHAIN_RPC_URL }}
+          export PRIVATE_KEY=${{ secrets.DEPLOYMENT_PRIVATE_KEY }}
+          
+          # Deploy contracts
+          forge script script/Deploy.s.sol:Deploy --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
+          
+      - name: Store deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-artifacts
+          path: |
+            out/
+            broadcast/

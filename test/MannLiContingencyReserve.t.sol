@@ -113,7 +113,7 @@ contract MannLiContingencyReserveTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 MannLiContingencyReserve.CooldownPeriodNotElapsed.selector,
-                90001
+                86400
             )
         );
         reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
@@ -131,7 +131,7 @@ contract MannLiContingencyReserveTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 MannLiContingencyReserve.CooldownPeriodNotElapsed.selector,
-                90001
+                180001
             )
         );
         reserve.withdrawEmergencyFunds(payable(riskManager), 1 ether, "Test emergency");
