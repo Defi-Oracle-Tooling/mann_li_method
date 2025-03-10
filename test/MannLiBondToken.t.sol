@@ -175,4 +175,108 @@ contract MannLiBondTokenTest is Test {
         bondToken.issueBond(holder1, amount);
         assertEq(bondToken.balanceOf(holder1), amount * 2);
     }
+    
+    function test_RateAdjustment() public {
+        uint256 amount = 1000 ether;
+        
+        // Create a new bond series
+        vm.startPrank(admin);
+        uint256 seriesId = bondToken.createBondSeries(
+            "Test Series",
+            1200, // 12% initial rate
+            900,  // 9% step-down rate
+            3650, // 10 years maturity
+            1825  // 5 years step-down
+        );
+        
+        // Wait for rate limit to expire
+        vm.warp(block.timestamp + 1 hours + 1 minutes);
+        
+        // Adjust rates
+        bondToken.adjustSeriesRates(seriesId, 1100, 800);
+        vm.stopPrank();
+        
+        // Issue bond from the new series
+        vm.prank(issuer);
+        bondToken.issueBondFromSeries(holder1, amount, seriesId);
+        
+        // Get series info and verify rates were updated
+        (
+            string memory name,
+            uint256 initialRate,
+            uint256 stepDownRate,
+            ,
+            ,
+            bool active
+        ) = bondToken.getBondSeriesInfo(seriesId);
+        
+        assertEq(initialRate, 1100);
+        assertEq(stepDownRate, 800);
+        assertTrue(active);
+    }
+    
+    function test_EarlyRedemption() public {
+        uint256 amount = 1000 ether;
+        
+        vm.startPrank(issuer);
+        bondToken.issueBond(holder1, amount);
+        vm.stopPrank();
+        
+        uint256 initialBalance = bondToken.balanceOf(holder1);
+        assertEq(initialBalance, amount);
+        
+        // Wait for lockup period to pass
+        vm.warp(block.timestamp + 31 days);
+        
+        // Redeem early
+        vm.prank(holder1);
+        bondToken.redeemEarly(500 ether);
+        
+        // Verify balance after redemption
+        uint256 finalBalance = bondToken.balanceOf(holder1);
+        assertEq(finalBalance, initialBalance - 500 ether);
+    }
+    
+    function test_RateLimiting() public {
+        // Create a new bond series
+        vm.startPrank(admin);
+        uint256 seriesId = bondToken.createBondSeries(
+            "Rate Limited Series",
+            1200, // 12% initial rate
+            900,  // 9% step-down rate
+            3650, // 10 years maturity
+            1825  // 5 years step-down
+        );
+        
+        // Wait for rate limit to expire after series creation
+        vm.warp(block.timestamp + 1 hours + 1 minutes);
+        
+        // First rate adjustment should succeed
+        bondToken.adjustSeriesRates(seriesId, 1100, 850);
+        
+        // Second rate adjustment should fail due to rate limiting
+        vm.expectRevert("Rate limit: Too many actions");
+        bondToken.adjustSeriesRates(seriesId, 1050, 800);
+        
+        // Wait for rate limit to expire
+        vm.warp(block.timestamp + 1 hours + 1 minutes);
+        
+        // Now the adjustment should succeed
+        bondToken.adjustSeriesRates(seriesId, 1050, 800);
+        
+        // Verify the rates were updated
+        (
+            ,
+            uint256 initialRate,
+            uint256 stepDownRate,
+            ,
+            ,
+            bool active
+        ) = bondToken.getBondSeriesInfo(seriesId);
+        
+        assertEq(initialRate, 1050);
+        assertEq(stepDownRate, 800);
+        assertTrue(active);
+        vm.stopPrank();
+    }
 }
