@@ -12,8 +12,12 @@ import "./MannLiBondToken.sol";
  */
 contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
     bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
+    bytes32 public constant STRATEGY_MANAGER_ROLE = keccak256("STRATEGY_MANAGER_ROLE");
     
     MannLiBondToken public bondToken;
+    
+    // Strategy interface for yield optimization
+    address public currentStrategy;
     
     struct ReinvestmentPool {
         uint256 totalFunds;
@@ -54,11 +58,14 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
     );
     event ReinvestmentFailed(string reason, uint256 amount);
     event EmergencyWithdrawal(address indexed admin, uint256 amount);
+    event ReinvestmentStrategyUpdated(string strategyName, address strategyAddress);
+    event YieldOptimizationExecuted(uint256 amount, uint256 newYield);
 
     constructor(address _bondToken) {
         bondToken = MannLiBondToken(_bondToken);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER_ROLE, msg.sender);
+        _grantRole(STRATEGY_MANAGER_ROLE, msg.sender);
         
         pool = ReinvestmentPool({
             totalFunds: 0,
@@ -203,6 +210,34 @@ contract MannLiReinvestment is ReentrancyGuard, AccessControl, Pausable {
         (bool success, ) = payable(msg.sender).call{value: balance}("");
         require(success, "Withdrawal failed");
         emit EmergencyWithdrawal(msg.sender, balance);
+    }
+    
+    // Strategy management functions
+    function setReinvestmentStrategy(address strategyAddress, string calldata strategyName) 
+        external 
+        onlyRole(STRATEGY_MANAGER_ROLE) 
+    {
+        require(strategyAddress != address(0), "Invalid strategy address");
+        currentStrategy = strategyAddress;
+        emit ReinvestmentStrategyUpdated(strategyName, strategyAddress);
+    }
+    
+    function optimizeYield(uint256 amount) 
+        external 
+        nonReentrant 
+        onlyRole(STRATEGY_MANAGER_ROLE) 
+        returns (uint256)
+    {
+        require(currentStrategy != address(0), "No strategy set");
+        require(amount > 0 && amount <= pool.totalFunds, "Invalid amount");
+        
+        // Placeholder for strategy execution
+        // In a real implementation, this would call into the strategy contract
+        uint256 newYield = amount + (amount * 5 / 100); // Simulate 5% yield
+        pool.totalFunds = (pool.totalFunds - amount) + newYield;
+        
+        emit YieldOptimizationExecuted(amount, newYield);
+        return newYield;
     }
 
     receive() external payable {}
